@@ -1,0 +1,88 @@
+version: '3'
+
+services:
+  postgres:
+    container_name: users_db
+    image: postgres:13-alpine
+    ports:
+      - '5432:5432'
+    restart: on-failure
+    environment: 
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_USER: postgres
+      PGDATA: /data
+    tmpfs: # during development, I want fresh database on each run
+      - /data
+    volumes:
+      - './schema.sql:/docker-entrypoint-initdb.d/init.sql:ro'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    container_name: nats
+    image: nats:2-alpine
+    ports:
+      - '8444:8444'
+      - '8445:8445'
+    command: nats-server -p 8444 -m 8445
+
+  api:
+    container_name: api
+    image: alpine:latest
+    ports: 
+      - '8001:8001'
+    command: /apps/api
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - './bin:/apps:ro'
+    environment:
+      DATABASE_URL: postgresql://postgres:secretpassword@postgres
+      NATS_URL: nats://nats:8444
+
+  users:
+    container_name: users
+    image: alpine:latest
+    command: /apps/userservice
+    restart: on-failure
+    depends_on: 
+      postgres:
+        condition: service_healthy
+    volumes:
+      - './bin:/apps:ro'
+    environment: 
+      DATABASE_URL: postgresql://postgres:secretpassword@postgres
+      NATS_URL: nats://nats:8444
+
+  denormalizer:
+    container_name: denormalizer
+    image: alpine:latest
+    command: /apps/denormalizer
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - './bin:/apps:ro'
+    environment: 
+      DATABASE_URL: postgresql://postgres:secretpassword@postgres
+      NATS_URL: nats://nats:8444
+
+  stats:
+    container_name: stats
+    image: alpine:latest
+    ports:
+      - "8010:8010"
+    command: /apps/stats
+    restart: on-failure
+    depends_on:
+      - nats
+    volumes:
+      - "./bin:/apps:ro"
+    environment:
+      NATS_URL: nats://nats:8444
