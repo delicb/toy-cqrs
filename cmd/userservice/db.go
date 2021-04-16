@@ -10,7 +10,7 @@ import (
 	"github.com/delicb/toy-cqrs/types"
 )
 
-type EventPersistenceManager interface {
+type EventPersistenceStore interface {
 	// GetEvents returns all events for provided aggregate ID sorted by creation time.
 	GetEvents(id string) ([]types.Event, error)
 
@@ -85,4 +85,4 @@ func (db *dbManager) SaveEvents(events []types.Event) (err error) {
 	})
 }
 
-var _ EventPersistenceManager = &dbManager{}
+var _ EventPersistenceStore = &dbManager{}

@@ -46,7 +46,7 @@ func main() {
 	log.Println("got exist signal:", sig)
 }
 
-func messageHandler(commandHandler UserCommandHandler, persistence EventPersistenceManager, natsConn *nats.Conn) func(msg *nats.Msg) {
+func messageHandler(commandHandler UserCommandHandler, persistence EventPersistenceStore, natsConn *nats.Conn) func(msg *nats.Msg) {
 	return func(msg *nats.Msg) {
 		cmd, err := types.UnmarshalCommand(msg.Data)
 		if err != nil {
