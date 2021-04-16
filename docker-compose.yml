@@ -39,6 +39,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      nats:
+        condition: service_started
     volumes:
       - './bin:/apps:ro'
     environment:
@@ -53,6 +55,8 @@ services:
     depends_on: 
       postgres:
         condition: service_healthy
+      nats:
+        condition: service_started
     volumes:
       - './bin:/apps:ro'
     environment: 
@@ -67,6 +71,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      nats:
+        condition: service_started
     volumes:
       - './bin:/apps:ro'
     environment: 
@@ -81,7 +87,8 @@ services:
     command: /apps/stats
     restart: on-failure
     depends_on:
-      - nats
+      nats:
+        condition: service_started
     volumes:
       - "./bin:/apps:ro"
     environment:
