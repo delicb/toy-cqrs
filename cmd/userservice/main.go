@@ -1,94 +1,93 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/nats-io/nats.go"
-
-	"github.com/delicb/toy-cqrs/types"
 )
 
 func main() {
-	db, err := newDBManager(os.Getenv("DATABASE_URL"))
-	if err != nil {
-		panic(err)
-	}
-	commandHandler := NewUserCommandHandler(db)
+	rootCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	natsConn, err := nats.Connect(os.Getenv("NATS_URL"))
 	if err != nil {
 		panic(err)
 	}
 
-	sub, err := natsConn.Subscribe("command.user.*", messageHandler(commandHandler, db, natsConn))
+	store, err := NewPsqlEventStorage(rootCtx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		if err := sub.Unsubscribe(); err != nil {
-			log.Println("ERROR: failed to unsubscribe from nats")
-		}
-	}()
+	repo := NewSimpleRepository(store)
+	// user is only type we have, so for now to not require command AggregateType to be populated
+	// TODO: ^ generalize
+	repo.RegisterCtor("user", func() AggregateRoot { return &User{} })
 
-	// wait for stop signal
+	handler := NewSimpleHandler(repo)
+
+	log.Println("subscribing to commands")
+	sub, err := natsConn.Subscribe("command.user.>", func(msg *nats.Msg) {
+		// get command name from subject
+		commandName := strings.TrimPrefix(msg.Subject, "command.user.")
+		log.Println("got command: ", commandName)
+		cmd, err := unmarshalCommand(commandName, msg.Data)
+		if err != nil {
+			respondError(msg, err)
+			return
+		}
+
+		log.Printf("Have command: %+v", cmd)
+		// respond that command is accepted
+		respondOk(msg)
+
+		if err := handler.HandleCommand(cmd); err != nil {
+			log.Println("handing command failed with error: ", err)
+			publishError(natsConn, cmd.GetCorrelationID(), err)
+		}
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	log.Println("waiting for the stop signal")
+	// wait for the stop signal
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
 	sig := <-signalCh
+	log.Printf("got signal: %v, stopping", sig)
 	if err := sub.Drain(); err != nil {
 		log.Printf("ERROR: nats drain failed: %v\n", err)
 	}
 	natsConn.Close()
-	log.Println("got exist signal:", sig)
 }
 
-func messageHandler(commandHandler UserCommandHandler, persistence EventPersistenceStore, natsConn *nats.Conn) func(msg *nats.Msg) {
-	return func(msg *nats.Msg) {
-		cmd, err := types.UnmarshalCommand(msg.Data)
-		if err != nil {
-			respondError(msg, err)
-		}
-		respondOk(msg)
-
-		// recreate user from previous events
-		user, err := commandHandler.RecreateUser(cmd)
-		if err != nil {
-			publishError(natsConn, cmd.CorrelationID(), err)
-			return
-		}
-
-		// validate command, on it own and against current user state
-		if err := commandHandler.Validate(user, cmd); err != nil {
-			publishError(natsConn, cmd.CorrelationID(), err)
-			return
-		}
-
-		// generate new events for this command
-		newEvents, err := commandHandler.Events(user, cmd)
-		if err != nil {
-			publishError(natsConn, cmd.CorrelationID(), err)
-			return
-		}
-
-		// apply new events to check if there are errors
-		if err := user.Apply(newEvents...); err != nil {
-			publishError(natsConn, cmd.CorrelationID(), err)
-			return
-		}
-
-		// finally, save events to database
-		if err := persistence.SaveEvents(newEvents); err != nil {
-			publishError(natsConn, cmd.CorrelationID(), err)
-			return
-		}
-
-		// if we got this far, we saved events to database, no need to
-		// do anything else
+func unmarshalCommand(name string, data []byte) (Command, error) {
+	var cmd Command
+	switch name {
+	case "create":
+		cmd = &CreateUser{}
+	case "change.email":
+		cmd = &ChangeUserEmail{}
+	case "change.password":
+		cmd = &ChangeUserPassword{}
+	case "enable":
+		cmd = &EnableUser{}
+	case "disable":
+		cmd = &DisableUser{}
+	default:
+		return nil, fmt.Errorf("unkonwn command: %v", name)
 	}
+
+	return cmd, json.Unmarshal(data, cmd)
 }
 
 func respondError(msg *nats.Msg, err error) {

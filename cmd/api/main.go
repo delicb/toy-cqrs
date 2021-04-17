@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"go.uber.org/multierr"
+	"github.com/nats-io/nats.go"
 	"golang.org/x/crypto/bcrypt"
-
-	"github.com/delicb/toy-cqrs/types"
 )
 
 func main() {
@@ -20,25 +17,32 @@ func main() {
 	defer cancel()
 
 	db := NewDBManager(rootContext, os.Getenv("DATABASE_URL"))
-	nats := NewNatsManager(os.Getenv("NATS_URL"))
+	natsConn, err := nats.Connect(os.Getenv("NATS_URL"))
+	if err != nil {
+		panic(err)
+	}
+	users := NewUsersClient(natsConn)
+
 	httpServer := &server{
-		nats: nats,
-		db:   db,
+		db:    db,
+		users: users,
 	}
 	app := echo.New()
 	app.Use(middleware.Logger())
 	app.Use(middleware.Recover())
 
-	app.GET("/:id", httpServer.getUser)
-	app.POST("/register", httpServer.registerUser)
-	app.POST("/emailChange", httpServer.emailChange)
-	app.PUT("/enableUser/:id", httpServer.enableUser)
+	app.GET("/users/:id", httpServer.getUser)
+	app.POST("/users/register", httpServer.registerUser)
+	app.PUT("/users/:id/emailChange", httpServer.emailChange)
+	app.PUT("/users/:id/passwordChange", httpServer.passwordChange)
+	app.PUT("/users/:id/enable", httpServer.enableUser)
+	app.PUT("/users/:id/disable", httpServer.disableUser)
 	app.Logger.Fatal(app.Start("0.0.0.0:8001"))
 }
 
 type server struct {
-	nats NatsManager
-	db   DBManager
+	db    DBManager
+	users UsersClient
 }
 
 func (s *server) getUser(c echo.Context) error {
@@ -65,15 +69,12 @@ func (s *server) registerUser(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := s.executeCommandSync(types.CreateUserCmdID, &types.CreateUserCmdParams{
-		Email:    request.Email,
-		Password: hashedPwd,
-	})
+	userID, err := s.users.Create(request.Email, hashedPwd)
 	if err != nil {
 		return err
 	}
 
-	user, err := s.db.GetUser(resp)
+	user, err := s.db.GetUser(userID)
 	if err != nil {
 		return err
 	}
@@ -92,21 +93,41 @@ func (s *server) emailChange(c echo.Context) error {
 		return err
 	}
 
-	resp, err := s.executeCommandSync(types.ModifyUserCmdID, &types.ModifyUserCmdParams{
-		ID:    request.ID,
-		Email: &request.Email,
-	})
+	userID := c.Param("id")
+	err := s.users.ChangeEmail(userID, request.Email)
 	if err != nil {
-		c.Logger().Error("got error during command execution: %v", err)
+		c.Logger().Errorf("got error during command execution: %v", err)
 		return err
 	}
 
-	if resp != request.ID {
-		c.Logger().Error("got wrong user in response")
-		return echo.NewHTTPError(http.StatusInternalServerError)
+	user, err := s.db.GetUser(userID)
+	if err != nil {
+		return err
 	}
+	return c.JSON(http.StatusOK, user)
+}
 
-	user, err := s.db.GetUser(resp)
+func (s *server) passwordChange(c echo.Context) error {
+	c.Logger().Debug("changing user password")
+	request := &passwordChangeRequest{}
+	if err := (&echo.DefaultBinder{}).BindBody(c, request); err != nil {
+		c.Logger().Errorf("failed to bind body to the request: %v", err)
+		return err
+	}
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	userID := c.Param("id")
+	hashedPwd, err := hashPassword(request.Password)
+	if err != nil {
+		return err
+	}
+	err = s.users.ChangePassword(userID, hashedPwd)
+	if err != nil {
+		c.Logger().Errorf("got error during command execution: %v", err)
+		return err
+	}
+	user, err := s.db.GetUser(userID)
 	if err != nil {
 		return err
 	}
@@ -116,19 +137,11 @@ func (s *server) emailChange(c echo.Context) error {
 func (s *server) enableUser(c echo.Context) error {
 	c.Logger().Debug("enabling user")
 	userID := c.Param("id")
-	enabled := true
-	resp, err := s.executeCommandSync(types.ModifyUserCmdID, &types.ModifyUserCmdParams{
-		ID:        userID,
-		IsEnabled: &enabled,
-	})
-	if err != nil {
-		c.Logger().Error("got error during command execution: %v", err)
+	if err := s.users.Enable(userID); err != nil {
+		c.Logger().Errorf("got error during command execution: %v", err)
 		return err
 	}
-	if resp != userID {
-		c.Logger().Error("got wrong user in response")
-		return echo.NewHTTPError(http.StatusInternalServerError)
-	}
+
 	user, err := s.db.GetUser(userID)
 	if err != nil {
 		return err
@@ -136,31 +149,19 @@ func (s *server) enableUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, user)
 }
 
-func (s *server) executeCommandSync(cmdID types.CommandID, params interface{}) (resp string, err error) {
-	cmd, err := types.NewCommand(cmdID, params)
+func (s *server) disableUser(c echo.Context) error {
+	c.Logger().Debug("disabling user")
+	userID := c.Param("id")
+	if err := s.users.Disable(userID); err != nil {
+		c.Logger().Errorf("got error during command execution: %v", err)
+		return err
+	}
+
+	user, err := s.db.GetUser(userID)
 	if err != nil {
-		return "", fmt.Errorf("failed to create a command: %w", err)
+		return err
 	}
-
-	// start listening for response before command is actually sent
-	_, _, err = s.nats.Subscribe(cmd.CorrelationID())
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		unsubErr := s.nats.Unsubscribe(cmd.CorrelationID())
-		if unsubErr != nil {
-			err = multierr.Combine(err, unsubErr)
-		}
-	}()
-
-	// send command
-	if err := s.nats.SendCommand(cmd); err != nil {
-		return "", err
-	}
-
-	// wait for the effect of executing command to reach us
-	return s.nats.WaitForEvent(cmd.CorrelationID(), 5*time.Second)
+	return c.JSON(http.StatusOK, user)
 }
 
 func hashPassword(in string) (string, error) {

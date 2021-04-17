@@ -11,13 +11,12 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nats-io/nats.go"
-
-	"github.com/delicb/toy-cqrs/types"
 )
 
 const notificationChannel = "new_event"
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting denormalizer")
 	// connect to database to receive events
 	pool, err := pgxpool.Connect(context.Background(), os.Getenv("DATABASE_URL"))
@@ -34,7 +33,7 @@ func main() {
 
 	publishManager := &natsManager{natsConn}
 
-	events := make(chan types.Event, 32)
+	events := make(chan *Event, 32)
 
 	// start listener
 	go listen(pool, events)
@@ -49,12 +48,12 @@ func main() {
 	fmt.Printf("got signal: %v, terminating", sig)
 
 	// cleanup
-	pool.Close()
+	// pool.Close() // TODO: Check why this blocks when shutting down
 	close(events)
 
 }
 
-func listen(pool *pgxpool.Pool, events chan<- types.Event) {
+func listen(pool *pgxpool.Pool, events chan<- *Event) {
 
 	conn, err := pool.Acquire(context.Background())
 	if err != nil {
@@ -81,7 +80,8 @@ func listen(pool *pgxpool.Pool, events chan<- types.Event) {
 			continue
 		}
 
-		ev, err := types.UnmarshalEvent([]byte(notification.Payload))
+		// ev, err := types.UnmarshalEvent([]byte(notification.Payload))
+		ev, err := UnmarshalEvent([]byte(notification.Payload))
 		if err != nil {
 			log.Println("failed to unmarshal event from database into event structure:", err)
 			continue
@@ -91,31 +91,31 @@ func listen(pool *pgxpool.Pool, events chan<- types.Event) {
 	}
 }
 
-func eventProcessor(db *dbManager, publish *natsManager, events <-chan types.Event) {
+func eventProcessor(db *dbManager, publish *natsManager, events <-chan *Event) {
 	for ev := range events {
 		var err error
-		switch ev.ID() {
-		case types.UserCreatedEventID:
+		switch ev.EventID {
+		case UserCreatedID:
 			err = db.insertUser(ev)
-		case types.UserPasswordChangedEventID:
+		case PasswordChangedID:
 			err = db.updateUserPassword(ev)
-		case types.UserEmailChangedEventID:
+		case EmailChangedID:
 			err = db.updateUserEmail(ev)
-		case types.UserEnabledEventID:
+		case EnabledID:
 			err = db.enableUser(ev)
-		case types.UserDisabledEventID:
+		case DisabledID:
 			err = db.disableUser(ev)
 		default:
-			log.Println("unknown event: ", ev.ID())
+			err = fmt.Errorf("unkonwn event while applying: %v", ev.EventID)
 		}
 
 		if err != nil {
 			log.Println("failed to apply event to database: ", err)
-			if publishErr := publish.eventFailed(ev.CorrelationID(), []byte(err.Error())); publishErr != nil {
+			if publishErr := publish.eventFailed(ev.CorrelationID, []byte(err.Error())); publishErr != nil {
 				log.Printf("ERROR: Failed to publish event processing failure: %v (original error: %v)\n", publishErr, err)
 			}
 		}
-		if publishErr := publish.eventSuccess(ev.CorrelationID(), []byte(ev.AggregateID())); publishErr != nil {
+		if publishErr := publish.eventSuccess(ev.CorrelationID, []byte(ev.AggregateID)); publishErr != nil {
 			log.Printf("ERROR: failed to publish event success message: %v", err)
 		}
 	}
@@ -125,57 +125,48 @@ type dbManager struct {
 	db *pgxpool.Pool
 }
 
-func (m *dbManager) insertUser(ev types.Event) error {
-	payload := &types.UserCreatedParams{}
-	if err := ev.LoadPayload(payload); err != nil {
-		return err
-	}
+func (m *dbManager) insertUser(ev *Event) error {
+	payload := ev.Data.(*UserCreated)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `
 			INSERT INTO users 
 				(id, email, password, enabled, last_event_time, last_correlation_id) 
 			VALUES ($1, $2, $3, $4, $5, $6)`,
-			ev.AggregateID(), payload.Email, payload.Password, payload.IsEnabled, ev.CreatedAt(), ev.CorrelationID())
+			ev.AggregateID, payload.Email, payload.Password, payload.IsEnabled, ev.CreatedAt, ev.CorrelationID)
 		return err
 	})
 }
 
-func (m *dbManager) updateUserPassword(ev types.Event) error {
-	payload := &types.UserPasswordChangedParams{}
-	if err := ev.LoadPayload(payload); err != nil {
-		return err
-	}
+func (m *dbManager) updateUserPassword(ev *Event) error {
+	payload := ev.Data.(*UserPasswordChanged)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET password=$1 WHERE id=$2`,
-			payload.NewPassword, ev.AggregateID())
+			payload.NewPassword, ev.AggregateID)
 		return err
 	})
 }
 
-func (m *dbManager) updateUserEmail(ev types.Event) error {
-	payload := &types.UserEmailChangedParams{}
-	if err := ev.LoadPayload(payload); err != nil {
-		return err
-	}
+func (m *dbManager) updateUserEmail(ev *Event) error {
+	payload := ev.Data.(*UserEmailChanged)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET email=$1 WHERE id=$2`,
-			payload.NewEmail, ev.AggregateID())
+			payload.NewEmail, ev.AggregateID)
 		return err
 	})
 }
 
-func (m *dbManager) enableUser(ev types.Event) error {
+func (m *dbManager) enableUser(ev *Event) error {
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET enabled=$1 WHERE id=$2`,
-			true, ev.AggregateID())
+			true, ev.AggregateID)
 		return err
 	})
 }
 
-func (m *dbManager) disableUser(ev types.Event) error {
+func (m *dbManager) disableUser(ev *Event) error {
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET enabled=$1 WHERE id=$2`,
-			false, ev.AggregateID())
+			false, ev.AggregateID)
 		return err
 	})
 }
@@ -189,5 +180,5 @@ func (n *natsManager) eventSuccess(correlationID string, payload []byte) error {
 }
 
 func (n *natsManager) eventFailed(correlationID string, payload []byte) error {
-	return n.conn.Publish(fmt.Sprintf("event.%v.failed", correlationID), payload)
+	return n.conn.Publish(fmt.Sprintf("event.%v.error", correlationID), payload)
 }

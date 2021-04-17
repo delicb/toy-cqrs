@@ -10,6 +10,6 @@ require (
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/multierr v1.6.0
 	golang.org/x/crypto v0.0.0-20210415154028-4f45737414dc
-	golang.org/x/tools v0.1.0 // indirect
+	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4 // indirect
 	google.golang.org/protobuf v1.26.0 // indirect
 )

@@ -25,17 +25,27 @@ func (r *userCreateRequest) Validate() error {
 }
 
 type emailChangeRequest struct {
-	ID    string `json:"id"`
 	Email string `json:"email"`
 }
 
 func (e *emailChangeRequest) Validate() error {
 	// basic validation
-	if e.ID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "ID is required")
-	}
 	if e.Email == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	}
+	return nil
+}
+
+type passwordChangeRequest struct {
+	Password string `json:"password,omitempty"`
+}
+
+func (p *passwordChangeRequest) Validate() error {
+	if p.Password == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "password is required")
+	}
+	if len(p.Password) < 3 {
+		return echo.NewHTTPError(http.StatusBadRequest, "password is too short")
 	}
 	return nil
 }
