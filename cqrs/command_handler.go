@@ -3,6 +3,8 @@ package cqrs
 import (
 	"errors"
 	"log"
+
+	"go.uber.org/multierr"
 )
 
 // CommandHandler can process and execute a command.
@@ -11,8 +13,13 @@ type CommandHandler interface {
 	HandleCommand(cmd Command) error
 }
 
+type CommandValidator interface {
+	Validate(Command) error
+}
+
 type simpleCommandHandler struct {
-	repo Repository
+	repo       Repository
+	validators []CommandValidator
 }
 
 func (h *simpleCommandHandler) HandleCommand(cmd Command) error {
@@ -35,6 +42,15 @@ func (h *simpleCommandHandler) HandleCommand(cmd Command) error {
 		return err
 	}
 
+	// call 3rd party validators to allow them to report errors
+	var validationError error
+	for _, validator := range h.validators {
+		validationError = multierr.Combine(validationError, validator.Validate(cmd))
+	}
+	if validationError != nil {
+		return validationError
+	}
+
 	// generate and apply new events
 	if err := root.HandleCommand(cmd); err != nil {
 		return err
@@ -51,6 +67,11 @@ func (h *simpleCommandHandler) HandleCommand(cmd Command) error {
 
 	// save, publish happens automatically with our postgres implementation
 	return h.repo.Save(root)
+}
+
+// AddValidator add new implementation of CommandValidator to be called during command handling.
+func (h *simpleCommandHandler) AddValidator(v CommandValidator) {
+	h.validators = append(h.validators, v)
 }
 
 func NewSimpleHandler(repo Repository) *simpleCommandHandler {

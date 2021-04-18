@@ -15,25 +15,41 @@ import (
 )
 
 func main() {
+	// root context
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// nats connection, we receive commands over nats
 	natsConn, err := nats.Connect(os.Getenv("NATS_URL"))
 	if err != nil {
 		panic(err)
 	}
 
+	// initialize storage
 	store, err := NewPsqlEventStore(rootCtx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		panic(err)
 	}
+
+	// create validator to register with command handler
+	validator, err := NewValidator(store)
+	if err != nil {
+		panic(err)
+	}
+
+	// register hook to update validator state when events are saved
+	store.AddAfterSaveHook(validator.UpdateEmailState)
+
+	// initialize aggregate root repository
 	repo := cqrs.NewSimpleRepository(store)
 
-	// user is only type we have, so for now to not require command AggregateType to be populated
-	// TODO: ^ generalize
+	// register constructor for our main (and only) aggregate root (user)
 	repo.RegisterCtor("user", func() cqrs.AggregateRoot { return &User{} })
 
+	// create simple command handler
 	handler := cqrs.NewSimpleHandler(repo)
+	// hook validator into command handler
+	handler.AddValidator(validator)
 
 	log.Println("subscribing to commands")
 	sub, err := natsConn.Subscribe("command.user.>", func(msg *nats.Msg) {
