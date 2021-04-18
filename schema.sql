@@ -4,7 +4,7 @@ create table if not exists events (
 	created_at timestamp with time zone not null,
 	correlation_id uuid not null,
 	event_id varchar(64) not null,
-	payload jsonb not null
+	data jsonb not null
 );
 
 -- most common query should benefit from this

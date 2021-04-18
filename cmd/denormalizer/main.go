@@ -11,6 +11,9 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nats-io/nats.go"
+
+	"github.com/delicb/toy-cqrs/cqrs"
+	"github.com/delicb/toy-cqrs/users"
 )
 
 const notificationChannel = "new_event"
@@ -33,7 +36,7 @@ func main() {
 
 	publishManager := &natsManager{natsConn}
 
-	events := make(chan *Event, 32)
+	events := make(chan *cqrs.Event, 32)
 
 	// start listener
 	go listen(pool, events)
@@ -53,7 +56,7 @@ func main() {
 
 }
 
-func listen(pool *pgxpool.Pool, events chan<- *Event) {
+func listen(pool *pgxpool.Pool, events chan<- *cqrs.Event) {
 
 	conn, err := pool.Acquire(context.Background())
 	if err != nil {
@@ -80,8 +83,7 @@ func listen(pool *pgxpool.Pool, events chan<- *Event) {
 			continue
 		}
 
-		// ev, err := types.UnmarshalEvent([]byte(notification.Payload))
-		ev, err := UnmarshalEvent([]byte(notification.Payload))
+		ev, err := users.EventSerializer.Unmarshal([]byte(notification.Payload))
 		if err != nil {
 			log.Println("failed to unmarshal event from database into event structure:", err)
 			continue
@@ -91,19 +93,19 @@ func listen(pool *pgxpool.Pool, events chan<- *Event) {
 	}
 }
 
-func eventProcessor(db *dbManager, publish *natsManager, events <-chan *Event) {
+func eventProcessor(db *dbManager, publish *natsManager, events <-chan *cqrs.Event) {
 	for ev := range events {
 		var err error
 		switch ev.EventID {
-		case UserCreatedID:
+		case users.UserCreatedID:
 			err = db.insertUser(ev)
-		case PasswordChangedID:
+		case users.PasswordChangedID:
 			err = db.updateUserPassword(ev)
-		case EmailChangedID:
+		case users.EmailChangedID:
 			err = db.updateUserEmail(ev)
-		case EnabledID:
+		case users.EnabledID:
 			err = db.enableUser(ev)
-		case DisabledID:
+		case users.DisabledID:
 			err = db.disableUser(ev)
 		default:
 			err = fmt.Errorf("unkonwn event while applying: %v", ev.EventID)
@@ -125,8 +127,8 @@ type dbManager struct {
 	db *pgxpool.Pool
 }
 
-func (m *dbManager) insertUser(ev *Event) error {
-	payload := ev.Data.(*UserCreated)
+func (m *dbManager) insertUser(ev *cqrs.Event) error {
+	payload := ev.Data.(*users.UserCreated)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `
 			INSERT INTO users 
@@ -137,8 +139,8 @@ func (m *dbManager) insertUser(ev *Event) error {
 	})
 }
 
-func (m *dbManager) updateUserPassword(ev *Event) error {
-	payload := ev.Data.(*UserPasswordChanged)
+func (m *dbManager) updateUserPassword(ev *cqrs.Event) error {
+	payload := ev.Data.(*users.UserPasswordChanged)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET password=$1 WHERE id=$2`,
 			payload.NewPassword, ev.AggregateID)
@@ -146,8 +148,8 @@ func (m *dbManager) updateUserPassword(ev *Event) error {
 	})
 }
 
-func (m *dbManager) updateUserEmail(ev *Event) error {
-	payload := ev.Data.(*UserEmailChanged)
+func (m *dbManager) updateUserEmail(ev *cqrs.Event) error {
+	payload := ev.Data.(*users.UserEmailChanged)
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET email=$1 WHERE id=$2`,
 			payload.NewEmail, ev.AggregateID)
@@ -155,7 +157,7 @@ func (m *dbManager) updateUserEmail(ev *Event) error {
 	})
 }
 
-func (m *dbManager) enableUser(ev *Event) error {
+func (m *dbManager) enableUser(ev *cqrs.Event) error {
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET enabled=$1 WHERE id=$2`,
 			true, ev.AggregateID)
@@ -163,7 +165,7 @@ func (m *dbManager) enableUser(ev *Event) error {
 	})
 }
 
-func (m *dbManager) disableUser(ev *Event) error {
+func (m *dbManager) disableUser(ev *cqrs.Event) error {
 	return m.db.BeginFunc(context.Background(), func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE users SET enabled=$1 WHERE id=$2`,
 			false, ev.AggregateID)

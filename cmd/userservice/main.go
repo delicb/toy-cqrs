@@ -2,15 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/delicb/toy-cqrs/cqrs"
+	"github.com/delicb/toy-cqrs/users"
 )
 
 func main() {
@@ -22,23 +23,22 @@ func main() {
 		panic(err)
 	}
 
-	store, err := NewPsqlEventStorage(rootCtx, os.Getenv("DATABASE_URL"))
+	store, err := NewPsqlEventStore(rootCtx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		panic(err)
 	}
-	repo := NewSimpleRepository(store)
+	repo := cqrs.NewSimpleRepository(store)
+
 	// user is only type we have, so for now to not require command AggregateType to be populated
 	// TODO: ^ generalize
-	repo.RegisterCtor("user", func() AggregateRoot { return &User{} })
+	repo.RegisterCtor("user", func() cqrs.AggregateRoot { return &User{} })
 
-	handler := NewSimpleHandler(repo)
+	handler := cqrs.NewSimpleHandler(repo)
 
 	log.Println("subscribing to commands")
 	sub, err := natsConn.Subscribe("command.user.>", func(msg *nats.Msg) {
 		// get command name from subject
-		commandName := strings.TrimPrefix(msg.Subject, "command.user.")
-		log.Println("got command: ", commandName)
-		cmd, err := unmarshalCommand(commandName, msg.Data)
+		cmd, err := users.CommandSerializer.Unmarshal(msg.Data)
 		if err != nil {
 			respondError(msg, err)
 			return
@@ -68,26 +68,6 @@ func main() {
 		log.Printf("ERROR: nats drain failed: %v\n", err)
 	}
 	natsConn.Close()
-}
-
-func unmarshalCommand(name string, data []byte) (Command, error) {
-	var cmd Command
-	switch name {
-	case "create":
-		cmd = &CreateUser{}
-	case "change.email":
-		cmd = &ChangeUserEmail{}
-	case "change.password":
-		cmd = &ChangeUserPassword{}
-	case "enable":
-		cmd = &EnableUser{}
-	case "disable":
-		cmd = &DisableUser{}
-	default:
-		return nil, fmt.Errorf("unkonwn command: %v", name)
-	}
-
-	return cmd, json.Unmarshal(data, cmd)
 }
 
 func respondError(msg *nats.Msg, err error) {

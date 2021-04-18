@@ -2,17 +2,19 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/delicb/toy-cqrs/cqrs"
 )
 
 type unknownCommandError struct {
-	cmd Command
+	cmd cqrs.Command
 }
 
 func (e *unknownCommandError) Error() string {
 	return fmt.Sprintf("unknown command: %T", e.cmd)
 }
 
-func ErrUnknownCommand(cmd Command) error {
+func ErrUnknownCommand(cmd cqrs.Command) error {
 	return &unknownCommandError{cmd}
 }
 
@@ -29,7 +31,7 @@ func ErrUnknownEvent(evt interface{}) error {
 }
 
 type commandValidationError struct {
-	cmd Command
+	cmd cqrs.Command
 	msg string
 }
 
@@ -37,7 +39,7 @@ func (e *commandValidationError) Error() string {
 	return fmt.Sprintf("command validation error for command: %T: %v", e.cmd, e.msg)
 }
 
-func ErrCommandValidation(cmd Command, msg string) error {
+func ErrCommandValidation(cmd cqrs.Command, msg string) error {
 	return &commandValidationError{
 		cmd: cmd,
 		msg: msg,

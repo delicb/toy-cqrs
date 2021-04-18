@@ -10,6 +10,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/nats-io/nats.go"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/delicb/toy-cqrs/users"
 )
 
 func main() {
@@ -21,11 +23,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	users := NewUsersClient(natsConn)
+	usersClient := users.NewClient(natsConn)
 
 	httpServer := &server{
 		db:    db,
-		users: users,
+		users: usersClient,
 	}
 	app := echo.New()
 	app.Use(middleware.Logger())
@@ -42,7 +44,7 @@ func main() {
 
 type server struct {
 	db    DBManager
-	users UsersClient
+	users users.Client
 }
 
 func (s *server) getUser(c echo.Context) error {

@@ -2,35 +2,37 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/delicb/toy-cqrs/cqrs"
+	"github.com/delicb/toy-cqrs/users"
 )
 
 // User is main domain entity for this service.
 type User struct {
-	Root
+	cqrs.Root
 
 	Email     string
 	Password  string
 	IsEnabled bool
 }
 
-func (u *User) Apply(new bool, ev *Event) error {
+func (u *User) Apply(new bool, ev *cqrs.Event) error {
 	switch d := ev.Data.(type) {
-	case *UserCreated:
+	case *users.UserCreated:
 		log.Println("applying user created command")
 		u.ID = ev.AggregateID
 		u.Email = d.Email
 		u.Password = d.Password
 		u.IsEnabled = d.IsEnabled
-	case *UserEmailChanged:
+	case *users.UserEmailChanged:
 		u.Email = d.NewEmail
-	case *UserPasswordChanged:
+	case *users.UserPasswordChanged:
 		u.Password = d.NewPassword
-	case *UserEnabled:
+	case *users.UserEnabled:
 		u.IsEnabled = true
-	case *UserDisabled:
+	case *users.UserDisabled:
 		u.IsEnabled = false
 	default:
 		return ErrUnknownEvent(ev.Data)
@@ -43,12 +45,12 @@ func (u *User) Apply(new bool, ev *Event) error {
 	return nil
 }
 
-func (u *User) HandleCommand(cmd Command) error {
+func (u *User) HandleCommand(cmd cqrs.Command) error {
 	log.Printf("handling command: %T\n", cmd)
 	switch c := cmd.(type) {
-	case *CreateUser:
+	case *users.CreateUser:
 		newUserID := uuid.NewString()
-		ev := NewEv(UserCreatedID, cmd, &UserCreated{
+		ev := cqrs.NewEvent(users.UserCreatedID, cmd, &users.UserCreated{
 			ID:        newUserID,
 			Email:     c.Email,
 			Password:  c.Password,
@@ -56,31 +58,21 @@ func (u *User) HandleCommand(cmd Command) error {
 		})
 		ev.AggregateID = newUserID
 		return u.Apply(true, ev)
-	case *ChangeUserEmail:
-		return u.Apply(true, NewEv(EmailChangedID, cmd, &UserEmailChanged{
+	case *users.ChangeUserEmail:
+		return u.Apply(true, cqrs.NewEvent(users.EmailChangedID, cmd, &users.UserEmailChanged{
 			NewEmail: c.Email,
 			OldEmail: u.Email,
 		}))
-	case *ChangeUserPassword:
-		return u.Apply(true, NewEv(PasswordChangedID, cmd, &UserPasswordChanged{
+	case *users.ChangeUserPassword:
+		return u.Apply(true, cqrs.NewEvent(users.PasswordChangedID, cmd, &users.UserPasswordChanged{
 			NewPassword: c.Password,
 			OldPassword: u.Password,
 		}))
-	case *EnableUser:
-		return u.Apply(true, NewEv(EnabledID, cmd, &UserEnabled{}))
-	case *DisableUser:
-		return u.Apply(true, NewEv(DisabledID, cmd, &UserDisabled{}))
+	case *users.EnableUser:
+		return u.Apply(true, cqrs.NewEvent(users.EnabledID, cmd, &users.UserEnabled{}))
+	case *users.DisableUser:
+		return u.Apply(true, cqrs.NewEvent(users.DisabledID, cmd, &users.UserDisabled{}))
 	default:
 		return ErrUnknownCommand(cmd)
-	}
-}
-
-func NewEv(id EventID, cmd Command, data interface{}) *Event {
-	return &Event{
-		EventID:       id,
-		AggregateID:   cmd.GetAggregateID(),
-		CreatedAt:     time.Now().UTC(),
-		CorrelationID: cmd.GetCorrelationID(),
-		Data:          data,
 	}
 }

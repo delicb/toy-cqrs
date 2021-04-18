@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/jackc/pgx/v4 v4.11.0
 	github.com/labstack/echo/v4 v4.2.2
+	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/nats-io/nats.go v1.10.0
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/multierr v1.6.0

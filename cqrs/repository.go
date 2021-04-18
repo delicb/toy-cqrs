@@ -1,4 +1,4 @@
-package main
+package cqrs
 
 import (
 	"fmt"
@@ -28,6 +28,13 @@ func (r *simpleRepository) Load(typ, aggregateID string) (AggregateRoot, error) 
 	}
 	root := ctor()
 
+	// if we did not get aggregate ID, this might be one of the root events (e.g. create),
+	// so there is no much sense to query the DB, just return empty aggregate root
+	if aggregateID == "" {
+		return root, nil
+	}
+
+	// otherwise load old events and apply them
 	oldEvents, err := r.store.Load(aggregateID)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package main
+package cqrs
 
 // AggregateRoot is an instance of a type that is entity being managed.
 // For example, in user service, User type would implement and be AggregateRoot.

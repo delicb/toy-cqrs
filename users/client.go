@@ -1,4 +1,4 @@
-package main
+package users
 
 import (
 	"encoding/json"
@@ -11,40 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/multierr"
+
+	"github.com/delicb/toy-cqrs/cqrs"
 )
 
-type Base struct {
-	ID            string `json:"id,omitempty"`
-	AggregateID   string `json:"aggregate_id,omitempty"`
-	AggregateType string `json:"aggregate_type,omitempty"`
-	CorrelationID string `json:"correlation_id,omitempty"`
-}
-
-type CreateUser struct {
-	Base
-	Email    string `json:"email,omitempty"`
-	Password string `json:"password,omitempty"`
-}
-
-type ChangeEmail struct {
-	Base
-	Email string `json:"email,omitempty"`
-}
-
-type ChangePassword struct {
-	Base
-	Password string `json:"password,omitempty"`
-}
-
-type Enable struct {
-	Base
-}
-
-type Disable struct {
-	Base
-}
-
-type UsersClient interface {
+// Client describes commands that can be executed on user service.
+type Client interface {
 	Create(email, password string) (userID string, err error)
 	ChangeEmail(userID, email string) error
 	ChangePassword(userID, password string) error
@@ -56,7 +28,8 @@ type userClient struct {
 	nm *nm
 }
 
-func NewUsersClient(conn *nats.Conn) *userClient {
+// NewClient returns instance of a user client.
+func NewClient(conn *nats.Conn) *userClient {
 	return &userClient{
 		nm: &nm{
 			conn:          conn,
@@ -70,8 +43,8 @@ func (c *userClient) Create(email, password string) (userID string, err error) {
 	correlationID := uuid.NewString()
 
 	cmd := &CreateUser{
-		Base: Base{
-			ID:            "create",
+		BaseCommand: cqrs.BaseCommand{
+			CommandID:     CreateUserID,
 			AggregateID:   "",
 			AggregateType: "user",
 			CorrelationID: correlationID,
@@ -90,9 +63,9 @@ func (c *userClient) Create(email, password string) (userID string, err error) {
 
 func (c *userClient) ChangeEmail(userID, email string) error {
 	correlationID := uuid.NewString()
-	cmd := &ChangeEmail{
-		Base: Base{
-			ID:            "change.email",
+	cmd := &ChangeUserEmail{
+		BaseCommand: cqrs.BaseCommand{
+			CommandID:     ChangeUserEmailID,
 			AggregateID:   userID,
 			AggregateType: "user",
 			CorrelationID: correlationID,
@@ -106,9 +79,9 @@ func (c *userClient) ChangeEmail(userID, email string) error {
 
 func (c *userClient) ChangePassword(userID, password string) error {
 	correlationID := uuid.NewString()
-	cmd := &ChangePassword{
-		Base: Base{
-			ID:            "change.password",
+	cmd := &ChangeUserPassword{
+		BaseCommand: cqrs.BaseCommand{
+			CommandID:     ChangeUserPasswordID,
 			AggregateID:   userID,
 			AggregateType: "user",
 			CorrelationID: correlationID,
@@ -122,8 +95,8 @@ func (c *userClient) ChangePassword(userID, password string) error {
 
 func (c *userClient) Enable(userID string) error {
 	correlationID := uuid.NewString()
-	cmd := &Enable{Base{
-		ID:            "enable",
+	cmd := &EnableUser{BaseCommand: cqrs.BaseCommand{
+		CommandID:     EnableUserID,
 		AggregateID:   userID,
 		AggregateType: "user",
 		CorrelationID: correlationID,
@@ -134,8 +107,8 @@ func (c *userClient) Enable(userID string) error {
 
 func (c *userClient) Disable(userID string) error {
 	correlationID := uuid.NewString()
-	cmd := &Disable{Base{
-		ID:            "disable",
+	cmd := &DisableUser{BaseCommand: cqrs.BaseCommand{
+		CommandID:     DisableUserID,
 		AggregateID:   userID,
 		AggregateType: "user",
 		CorrelationID: correlationID,
@@ -167,7 +140,7 @@ func (c *userClient) SendCommandAndWait(cmdName, correlationID string, cmd inter
 	return c.nm.WaitForEvent(responseEventSubject, timeout)
 }
 
-var _ UsersClient = &userClient{}
+var _ Client = &userClient{}
 
 type activeSub struct {
 	ch    <-chan []byte
