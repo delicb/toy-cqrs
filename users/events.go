@@ -12,7 +12,7 @@ func init() {
 	serializer := cqrs.NewEventJSONSerializer()
 	serializer.RegisterDataCtor(UserCreatedID, func() interface{} { return &UserCreated{} })
 	serializer.RegisterDataCtor(EmailChangedID, func() interface{} { return &UserEmailChanged{} })
-	serializer.RegisterDataCtor(PasswordChangedID, func() interface{} { return &UserEmailChanged{} })
+	serializer.RegisterDataCtor(PasswordChangedID, func() interface{} { return &UserPasswordChanged{} })
 	serializer.RegisterDataCtor(EnabledID, func() interface{} { return &UserEnabled{} })
 	serializer.RegisterDataCtor(DisabledID, func() interface{} { return &UserDisabled{} })
 
@@ -35,14 +35,14 @@ type UserCreated struct {
 
 // UserEmailChanged is event indicating that user's email has been changed.
 type UserEmailChanged struct {
-	NewEmail string `json:"new_email,omitempty"`
-	OldEmail string `json:"old_email,omitempty"`
+	NewEmail string `json:"new_email,omitempty" mapstructure:"new_email"`
+	OldEmail string `json:"old_email,omitempty" mapstructure:"old_email"`
 }
 
 // UserPasswordChanged is event indicating that user's password has been changed.
 type UserPasswordChanged struct {
-	NewPassword string `json:"new_password,omitempty"`
-	OldPassword string `json:"old_password,omitempty"`
+	NewPassword string `json:"new_password,omitempty" mapstructure:"new_password"`
+	OldPassword string `json:"old_password,omitempty" mapstructure:"old_password"`
 }
 
 // UserEnabled is event indicating that user has been enabled.

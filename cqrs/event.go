@@ -88,7 +88,7 @@ func (e *eventJSONSerializer) Unmarshal(rawData []byte) (*Event, error) {
 
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		Metadata:   nil,
-		DecodeHook: ToTimeHookFunc(),
+		DecodeHook: toTimeHookFunc(),
 		Result:     ev,
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func (e *eventJSONSerializer) UnmarshalData(eventID EventID, data []byte) (inter
 	return eventData, json.Unmarshal(data, &eventData)
 }
 
-func ToTimeHookFunc() mapstructure.DecodeHookFunc {
+func toTimeHookFunc() mapstructure.DecodeHookFunc {
 	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
 		if t != reflect.TypeOf(time.Time{}) {
 			return data, nil
