@@ -11,4 +11,4 @@ go build -o ./bin/denormalizer ./cmd/denormalizer
 go build -o ./bin/stats ./cmd/stats
 
 echo "starting containers"
-docker-compose up
+docker compose up

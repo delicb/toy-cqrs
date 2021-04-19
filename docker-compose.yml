@@ -28,6 +28,11 @@ services:
       - '8444:8444'
       - '8445:8445'
     command: nats-server -p 8444 -m 8445
+    healthcheck:
+      test: echo $$(wget --server-response http://nats:8445/varz 2>&1 | grep  '200 OK') | grep '200'  || exit 1
+      interval: 20s
+      timeout: 5s
+      retries: 5
 
   api:
     container_name: api
