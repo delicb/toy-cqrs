@@ -12,6 +12,8 @@ are best tool for the job. Since learning and having fun while doing
 this was main motivator, entire project is hugely over-engineered. 
 
 ## Start
+First take a look at [documentation](./DOCUMENTATION.md).
+
 To start locally (the only way I have tested this), you need
 [Go](https://golang.org) and [Docker](https://docker.com) installed.
 
