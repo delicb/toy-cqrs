@@ -52,11 +52,11 @@ func (p *statsMonitor) onMessage(msg *nats.Msg) {
 }
 
 func (p *statsMonitor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "total commands: %d\n", p.cmdCount)
 	fmt.Fprintf(w, "total events: %d\n", p.eventsCount)
 	fmt.Fprintf(w, "total error events: %d\n", p.errorEventsCount)
 	if p.eventsCount > 0 {
 		fmt.Fprintf(w, "total errors percentage: %d\n", p.errorEventsCount/p.eventsCount*100)
 	}
-	w.WriteHeader(http.StatusOK)
 }
