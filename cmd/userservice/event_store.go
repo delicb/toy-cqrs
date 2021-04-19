@@ -32,7 +32,7 @@ func (p *psqlEventStorage) Load(aggregateID string) ([]*cqrs.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 	rows, err := p.conn.Query(ctx,
-		`SELECT aggregate_id, created_at, correlation_id, event_id, data
+		`SELECT aggregate_id, aggregate_type, created_at, correlation_id, event_id, data
 			FROM events
 			WHERE aggregate_id = $1
 			ORDER BY created_at ASC`, aggregateID)
@@ -54,10 +54,10 @@ func (p *psqlEventStorage) Save(events []*cqrs.Event) error {
 			}
 			_, err = tx.Exec(context.Background(), `
 				INSERT INTO events
-					(aggregate_id, created_at, correlation_id, event_id, data)
+					(aggregate_id, aggregate_type, created_at, correlation_id, event_id, data)
 				VALUES
-					($1, $2, $3, $4, $5)`,
-				ev.AggregateID, ev.CreatedAt, ev.CorrelationID, ev.EventID, data,
+					($1, $2, $3, $4, $5, $6)`,
+				ev.AggregateID, ev.AggregateType, ev.CreatedAt, ev.CorrelationID, ev.EventID, data,
 			)
 			if err != nil {
 				return err
@@ -86,7 +86,9 @@ func (p *psqlEventStorage) LoadEmailEvents() ([]*cqrs.Event, error) {
 	rows, err := p.conn.Query(ctx, `
 		SELECT aggregate_id, created_at, correlation_id, event_id, data 
 		FROM events 
-		WHERE event_id='user.created' OR event_id='user.email.changed' 
+		WHERE 
+			event_id='user.created' OR 
+			event_id='user.email.changed' 
 		ORDER BY created_at
 	`)
 	if err != nil {
@@ -105,11 +107,12 @@ func rowsToEvents(rows pgx.Rows) ([]*cqrs.Event, error) {
 	events := make([]*cqrs.Event, 0)
 	for rows.Next() {
 		var aggregateID string
+		var aggregateType string
 		var createdAt time.Time
 		var correlationID string
 		var eventID cqrs.EventID
 		var data []byte
-		if err := rows.Scan(&aggregateID, &createdAt, &correlationID, &eventID, &data); err != nil {
+		if err := rows.Scan(&aggregateID, &aggregateType, &createdAt, &correlationID, &eventID, &data); err != nil {
 			return nil, err
 		}
 		eventData, err := users.EventSerializer.UnmarshalData(eventID, data)
@@ -119,6 +122,7 @@ func rowsToEvents(rows pgx.Rows) ([]*cqrs.Event, error) {
 		ev := &cqrs.Event{
 			EventID:       eventID,
 			AggregateID:   aggregateID,
+			AggregateType: aggregateType,
 			CreatedAt:     createdAt,
 			CorrelationID: correlationID,
 			Data:          eventData,

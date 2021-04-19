@@ -1,6 +1,7 @@
 -- event store
 create table if not exists events (
 	aggregate_id uuid not null,
+	aggregate_type varchar(64) not null,
 	created_at timestamp with time zone not null,
 	correlation_id uuid not null,
 	event_id varchar(64) not null,

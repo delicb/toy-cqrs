@@ -19,6 +19,7 @@ type EventID string
 type Event struct {
 	EventID       EventID     `json:"event_id" mapstructure:"event_id"`
 	AggregateID   string      `json:"aggregate_id" mapstructure:"aggregate_id"`
+	AggregateType string      `json:"aggregate_type" mapstructure:"aggregate_type"`
 	CreatedAt     time.Time   `json:"created_at" mapstructure:"created_at"`
 	CorrelationID string      `json:"correlation_id" mapstructure:"correlation_id"`
 	Data          interface{} `json:"data" mapstructure:"data"`
@@ -30,6 +31,7 @@ func NewEvent(ID EventID, cmd Command, data interface{}) *Event {
 	return &Event{
 		EventID:       ID,
 		AggregateID:   cmd.GetAggregateID(),
+		AggregateType: cmd.GetAggregateType(),
 		CreatedAt:     time.Now().UTC(),
 		CorrelationID: cmd.GetCorrelationID(),
 		Data:          data,
